@@ -119,4 +119,3 @@ jobs:
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: |
           kubectl delete -f kubernetes/ --ignore-not-found=true
-give me all right code updated 
