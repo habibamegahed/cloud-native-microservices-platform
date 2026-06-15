@@ -1,268 +1,262 @@
 name: Manual CI/CD Deploy
 
 on:
-workflow_dispatch:
-inputs:
-environment:
-description: "Choose deployment environment"
-required: true
-type: choice
-default: dev
-options:
-- dev
-- staging
-- prod
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Choose deployment environment"
+        required: true
+        type: choice
+        default: dev
+        options:
+          - dev
+          - staging
+          - prod
 
-```
-  namespace:
-    description: "Kubernetes namespace"
-    required: true
-    type: choice
-    default: sock-shop
-    options:
-      - sock-shop
-      - habiba-dev
-      - cloudnova
+      namespace:
+        description: "Kubernetes namespace"
+        required: true
+        type: choice
+        default: sock-shop
+        options:
+          - sock-shop
+          - habiba-dev
+          - cloudnova
 
-  action:
-    description: "What do you want to run?"
-    required: true
-    type: choice
-    default: deploy
-    options:
-      - plan
-      - deploy
-      - destroy
+      action:
+        description: "What do you want to run?"
+        required: true
+        type: choice
+        default: deploy
+        options:
+          - plan
+          - deploy
+          - destroy
 
-  apply_terraform:
-    description: "Run Terraform infrastructure steps?"
-    required: true
-    type: boolean
-    default: false
+      apply_terraform:
+        description: "Run Terraform infrastructure steps?"
+        required: true
+        type: boolean
+        default: false
 
-  aws_region:
-    description: "AWS region for EKS and AWS CLI"
-    required: false
-    type: string
-    default: us-east-1
+      aws_region:
+        description: "AWS region for EKS and AWS CLI"
+        required: false
+        type: string
+        default: us-east-1
 
-  eks_cluster_name:
-    description: "EKS cluster name. Leave empty to use secret EKS_CLUSTER_NAME"
-    required: false
-    type: string
-    default: ""
-```
+      eks_cluster_name:
+        description: "EKS cluster name. Leave empty to use secret EKS_CLUSTER_NAME"
+        required: false
+        type: string
+        default: ""
 
 jobs:
-ci-cd:
-runs-on: ubuntu-latest
+  ci-cd:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
-```
-permissions:
-  contents: read
-  id-token: write
-
-env:
-  AWS_REGION: ${{ inputs.aws_region }}
-  KUBE_NAMESPACE: ${{ inputs.namespace }}
-
-steps:
-  - name: Checkout repository
-    uses: actions/checkout@v4
-
-  - name: Configure AWS credentials
-    uses: aws-actions/configure-aws-credentials@v4
-    with:
-      aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      aws-region: ${{ inputs.aws_region }}
-
-  - name: Setup Terraform
-    uses: hashicorp/setup-terraform@v4
-    with:
-      terraform_version: 1.5.7
-
-  - name: Setup kubectl
-    uses: azure/setup-kubectl@v4
-    with:
-      version: latest
-
-  - name: Show selected parameters
-    run: |
-      echo "Environment: ${{ inputs.environment }}"
-      echo "Namespace: $KUBE_NAMESPACE"
-      echo "Action: ${{ inputs.action }}"
-      echo "Apply Terraform: ${{ inputs.apply_terraform }}"
-      echo "AWS Region: $AWS_REGION"
-
-  - name: Terraform init
-    if: ${{ inputs.apply_terraform == true || inputs.action == 'plan' }}
-    working-directory: terraform/eks
     env:
-      TF_REGISTRY_CLIENT_TIMEOUT: 60
-    run: |
-      for i in 1 2 3; do
-        terraform init -input=false && break
-        echo "Terraform init failed. Retrying in 15 seconds..."
-        sleep 15
-      done
+      AWS_REGION: ${{ github.event.inputs.aws_region }}
+      KUBE_NAMESPACE: ${{ github.event.inputs.namespace }}
 
-  - name: Terraform plan
-    if: ${{ inputs.action == 'plan' }}
-    working-directory: terraform/eks
-    run: |
-      terraform plan -input=false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  - name: Terraform apply
-    if: ${{ inputs.action == 'deploy' && inputs.apply_terraform == true }}
-    working-directory: terraform/eks
-    run: |
-      terraform apply -input=false -auto-approve
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.inputs.aws_region }}
 
-  - name: Terraform destroy
-    if: ${{ inputs.action == 'destroy' && inputs.apply_terraform == true }}
-    working-directory: terraform/eks
-    run: |
-      terraform destroy -input=false -auto-approve
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.5.7
 
-  - name: Configure kubeconfig
-    if: ${{ inputs.action == 'deploy' || inputs.action == 'destroy' }}
-    run: |
-      CLUSTER_NAME="${{ inputs.eks_cluster_name }}"
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
 
-      if [ -z "$CLUSTER_NAME" ]; then
-        CLUSTER_NAME="${{ secrets.EKS_CLUSTER_NAME }}"
-      fi
+      - name: Show selected parameters
+        run: |
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Namespace: $KUBE_NAMESPACE"
+          echo "Action: ${{ github.event.inputs.action }}"
+          echo "Apply Terraform: ${{ github.event.inputs.apply_terraform }}"
+          echo "AWS Region: $AWS_REGION"
 
-      if [ -z "$CLUSTER_NAME" ]; then
-        echo "Error: EKS cluster name is not provided."
-        echo "Set workflow input eks_cluster_name or repository secret EKS_CLUSTER_NAME."
-        exit 1
-      fi
+      - name: Terraform init
+        if: ${{ github.event.inputs.apply_terraform == 'true' || github.event.inputs.action == 'plan' }}
+        working-directory: terraform/eks
+        env:
+          TF_REGISTRY_CLIENT_TIMEOUT: 60
+        run: |
+          for i in 1 2 3; do
+            terraform init -input=false && break
+            echo "Terraform init failed. Retrying in 15 seconds..."
+            sleep 15
+          done
 
-      aws eks update-kubeconfig \
-        --name "$CLUSTER_NAME" \
-        --region "$AWS_REGION"
+      - name: Terraform plan
+        if: ${{ github.event.inputs.action == 'plan' }}
+        working-directory: terraform/eks
+        run: |
+          terraform plan -input=false
 
-      kubectl config current-context
-      kubectl get nodes
+      - name: Terraform apply
+        if: ${{ github.event.inputs.action == 'deploy' && github.event.inputs.apply_terraform == 'true' }}
+        working-directory: terraform/eks
+        run: |
+          terraform apply -input=false -auto-approve
 
-  - name: Deploy Kubernetes manifests
-    if: ${{ inputs.action == 'deploy' }}
-    run: |
-      echo "Creating namespace if not exists..."
-      kubectl create namespace "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+      - name: Terraform destroy
+        if: ${{ github.event.inputs.action == 'destroy' && github.event.inputs.apply_terraform == 'true' }}
+        working-directory: terraform/eks
+        run: |
+          terraform destroy -input=false -auto-approve
 
-      echo "Applying Kubernetes manifests in order..."
+      - name: Configure kubeconfig
+        if: ${{ github.event.inputs.action == 'deploy' || github.event.inputs.action == 'destroy' }}
+        run: |
+          CLUSTER_NAME="${{ github.event.inputs.eks_cluster_name }}"
 
-      if [ -d kubernetes/configs ]; then
-        kubectl apply -f kubernetes/configs/ -n "$KUBE_NAMESPACE"
-      fi
+          if [ -z "$CLUSTER_NAME" ]; then
+            CLUSTER_NAME="${{ secrets.EKS_CLUSTER_NAME }}"
+          fi
 
-      if [ -d kubernetes/secrets ]; then
-        kubectl apply -f kubernetes/secrets/ -n "$KUBE_NAMESPACE"
-      fi
+          if [ -z "$CLUSTER_NAME" ]; then
+            echo "Error: EKS cluster name is not provided."
+            echo "Set workflow input eks_cluster_name or repository secret EKS_CLUSTER_NAME."
+            exit 1
+          fi
 
-      if [ -d kubernetes/rbac ]; then
-        kubectl apply -f kubernetes/rbac/ -n "$KUBE_NAMESPACE"
-      fi
+          echo "Using EKS cluster: $CLUSTER_NAME"
+          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
 
-      if [ -d kubernetes/storage ]; then
-        kubectl apply -f kubernetes/storage/
-      fi
+          kubectl config current-context
+          kubectl get nodes
 
-      if [ -d kubernetes/services ]; then
-        kubectl apply -f kubernetes/services/ -n "$KUBE_NAMESPACE"
-      fi
+      - name: Deploy Kubernetes manifests
+        if: ${{ github.event.inputs.action == 'deploy' }}
+        run: |
+          echo "Creating namespace if not exists..."
+          kubectl create namespace "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
-      if [ -d kubernetes/deployments ]; then
-        kubectl apply -f kubernetes/deployments/ -n "$KUBE_NAMESPACE"
-      fi
+          echo "Applying Kubernetes manifests in order..."
 
-      if [ -d kubernetes/daemonset ]; then
-        kubectl apply -f kubernetes/daemonset/ -n "$KUBE_NAMESPACE"
-      fi
+          if [ -d kubernetes/configs ]; then
+            kubectl apply -f kubernetes/configs/ -n "$KUBE_NAMESPACE"
+          fi
 
-      if [ -d kubernetes/hpa ]; then
-        kubectl apply -f kubernetes/hpa/ -n "$KUBE_NAMESPACE"
-      fi
+          if [ -d kubernetes/secrets ]; then
+            kubectl apply -f kubernetes/secrets/ -n "$KUBE_NAMESPACE"
+          fi
 
-      if [ -d kubernetes/ingress ]; then
-        kubectl apply -f kubernetes/ingress/ -n "$KUBE_NAMESPACE"
-      fi
+          if [ -d kubernetes/rbac ]; then
+            kubectl apply -f kubernetes/rbac/ -n "$KUBE_NAMESPACE"
+          fi
 
-  - name: Deploy monitoring stack
-    if: ${{ inputs.action == 'deploy' }}
-    run: |
-      if [ -d kubernetes/monitoring ]; then
-        kubectl apply -f kubernetes/monitoring/
-      else
-        echo "No monitoring directory found. Skipping monitoring deploy."
-      fi
+          if [ -d kubernetes/storage ]; then
+            kubectl apply -f kubernetes/storage/
+          fi
 
-  - name: Verify deployment
-    if: ${{ inputs.action == 'deploy' }}
-    run: |
-      echo "=== Application Pods ==="
-      kubectl get pods -n "$KUBE_NAMESPACE" -o wide
+          if [ -d kubernetes/services ]; then
+            kubectl apply -f kubernetes/services/ -n "$KUBE_NAMESPACE"
+          fi
 
-      echo "=== Application Services ==="
-      kubectl get svc -n "$KUBE_NAMESPACE"
+          if [ -d kubernetes/deployments ]; then
+            kubectl apply -f kubernetes/deployments/ -n "$KUBE_NAMESPACE"
+          fi
 
-      echo "=== Application Ingress ==="
-      kubectl get ingress -n "$KUBE_NAMESPACE" || true
+          if [ -d kubernetes/daemonset ]; then
+            kubectl apply -f kubernetes/daemonset/ -n "$KUBE_NAMESPACE"
+          fi
 
-      echo "=== HPA ==="
-      kubectl get hpa -n "$KUBE_NAMESPACE" || true
+          if [ -d kubernetes/hpa ]; then
+            kubectl apply -f kubernetes/hpa/ -n "$KUBE_NAMESPACE"
+          fi
 
-      echo "=== Monitoring Pods ==="
-      kubectl get pods -n monitoring -o wide || true
+          if [ -d kubernetes/ingress ]; then
+            kubectl apply -f kubernetes/ingress/ -n "$KUBE_NAMESPACE"
+          fi
 
-      echo "=== Monitoring Services ==="
-      kubectl get svc -n monitoring || true
+      - name: Deploy monitoring stack
+        if: ${{ github.event.inputs.action == 'deploy' }}
+        run: |
+          if [ -d kubernetes/monitoring ]; then
+            kubectl apply -f kubernetes/monitoring/
+          else
+            echo "No monitoring directory found. Skipping monitoring deploy."
+          fi
 
-  - name: Destroy Kubernetes manifests
-    if: ${{ inputs.action == 'destroy' }}
-    run: |
-      echo "Deleting Kubernetes manifests in reverse order..."
+      - name: Verify deployment
+        if: ${{ github.event.inputs.action == 'deploy' }}
+        run: |
+          echo "=== Application Pods ==="
+          kubectl get pods -n "$KUBE_NAMESPACE" -o wide
 
-      if [ -d kubernetes/monitoring ]; then
-        kubectl delete -f kubernetes/monitoring/ --ignore-not-found=true
-      fi
+          echo "=== Application Services ==="
+          kubectl get svc -n "$KUBE_NAMESPACE"
 
-      if [ -d kubernetes/ingress ]; then
-        kubectl delete -f kubernetes/ingress/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
-      fi
+          echo "=== Application Ingress ==="
+          kubectl get ingress -n "$KUBE_NAMESPACE" || true
 
-      if [ -d kubernetes/hpa ]; then
-        kubectl delete -f kubernetes/hpa/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
-      fi
+          echo "=== HPA ==="
+          kubectl get hpa -n "$KUBE_NAMESPACE" || true
 
-      if [ -d kubernetes/daemonset ]; then
-        kubectl delete -f kubernetes/daemonset/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
-      fi
+          echo "=== Monitoring Pods ==="
+          kubectl get pods -n monitoring -o wide || true
 
-      if [ -d kubernetes/deployments ]; then
-        kubectl delete -f kubernetes/deployments/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
-      fi
+          echo "=== Monitoring Services ==="
+          kubectl get svc -n monitoring || true
 
-      if [ -d kubernetes/services ]; then
-        kubectl delete -f kubernetes/services/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
-      fi
+      - name: Destroy Kubernetes manifests
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        run: |
+          echo "Deleting Kubernetes manifests in reverse order..."
 
-      if [ -d kubernetes/storage ]; then
-        kubectl delete -f kubernetes/storage/ --ignore-not-found=true
-      fi
+          if [ -d kubernetes/monitoring ]; then
+            kubectl delete -f kubernetes/monitoring/ --ignore-not-found=true
+          fi
 
-      if [ -d kubernetes/rbac ]; then
-        kubectl delete -f kubernetes/rbac/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
-      fi
+          if [ -d kubernetes/ingress ]; then
+            kubectl delete -f kubernetes/ingress/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
+          fi
 
-      if [ -d kubernetes/secrets ]; then
-        kubectl delete -f kubernetes/secrets/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
-      fi
+          if [ -d kubernetes/hpa ]; then
+            kubectl delete -f kubernetes/hpa/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
+          fi
 
-      if [ -d kubernetes/configs ]; then
-        kubectl delete -f kubernetes/configs/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
-      fi
-```
+          if [ -d kubernetes/daemonset ]; then
+            kubectl delete -f kubernetes/daemonset/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
+          fi
+
+          if [ -d kubernetes/deployments ]; then
+            kubectl delete -f kubernetes/deployments/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
+          fi
+
+          if [ -d kubernetes/services ]; then
+            kubectl delete -f kubernetes/services/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
+          fi
+
+          if [ -d kubernetes/storage ]; then
+            kubectl delete -f kubernetes/storage/ --ignore-not-found=true
+          fi
+
+          if [ -d kubernetes/rbac ]; then
+            kubectl delete -f kubernetes/rbac/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
+          fi
+
+          if [ -d kubernetes/secrets ]; then
+            kubectl delete -f kubernetes/secrets/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
+          fi
+
+          if [ -d kubernetes/configs ]; then
+            kubectl delete -f kubernetes/configs/ -n "$KUBE_NAMESPACE" --ignore-not-found=true
+          fi
