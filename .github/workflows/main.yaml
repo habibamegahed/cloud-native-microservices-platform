@@ -1,122 +1,157 @@
 name: Manual CI/CD Deploy
 
 on:
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: "Choose deployment environment"
-        required: true
-        type: choice
-        default: dev
-        options:
-          - dev
-          - staging
-          - prod
+workflow_dispatch:
+inputs:
+environment:
+description: "Choose deployment environment"
+required: true
+type: choice
+default: dev
+options:
+- dev
+- staging
+- prod
 
-      namespace:
-        description: "Kubernetes namespace"
-        required: true
-        type: choice
-        default: sock-shop
-        options:
-          - sock-shop
-          - habiba-dev
-          - cloudnova
+```
+  namespace:
+    description: "Kubernetes namespace"
+    required: true
+    type: choice
+    default: sock-shop
+    options:
+      - sock-shop
+      - habiba-dev
+      - cloudnova
 
-      action:
-        description: "What do you want to run?"
-        required: true
-        type: choice
-        default: deploy
-        options:
-          - plan
-          - deploy
-          - destroy
+  action:
+    description: "What do you want to run?"
+    required: true
+    type: choice
+    default: deploy
+    options:
+      - plan
+      - deploy
+      - destroy
 
-      apply_terraform:
-        description: "Run Terraform?"
-        required: true
-        type: boolean
-        default: false
+  apply_terraform:
+    description: "Run Terraform?"
+    required: true
+    type: boolean
+    default: false
 
-      aws_region:
-        description: "AWS region for EKS and AWS CLI"
-        required: false
-        type: string
-        default: us-east-1
+  aws_region:
+    description: "AWS region for EKS and AWS CLI"
+    required: false
+    type: string
+    default: us-east-1
+```
 
 jobs:
-  manual-run:
-    runs-on: ubuntu-latest
+manual-run:
+runs-on: ubuntu-latest
 
-    env:
-      AWS_REGION: ${{ inputs.aws_region }}
-      CLUSTER_NAME: sock-shop-${{ inputs.environment }}-eks
-      KUBE_NAMESPACE: ${{ inputs.namespace }}
+```
+env:
+  AWS_REGION: ${{ inputs.aws_region }}
+  CLUSTER_NAME: sock-shop-${{ inputs.environment }}-eks
+  KUBE_NAMESPACE: ${{ inputs.namespace }}
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+steps:
+  - name: Checkout code
+    uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ inputs.aws_region }}
+  - name: Configure AWS credentials
+    uses: aws-actions/configure-aws-credentials@v4
+    with:
+      aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      aws-region: ${{ inputs.aws_region }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_version: 1.5.7
+  - name: Setup Terraform
+    uses: hashicorp/setup-terraform@v4
+    with:
+      terraform_version: 1.5.7
 
-      - name: Setup kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: 'latest'
+  - name: Setup kubectl
+    uses: azure/setup-kubectl@v4
+    with:
+      version: latest
 
-      - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v1
+  - name: Show selected parameters
+    run: |
+      echo "Environment: ${{ inputs.environment }}"
+      echo "Namespace: ${{ inputs.namespace }}"
+      echo "Action: ${{ inputs.action }}"
+      echo "Apply Terraform: ${{ inputs.apply_terraform }}"
+      echo "AWS Region: $AWS_REGION"
+      echo "Cluster Name: $CLUSTER_NAME"
 
-      - name: Show selected parameters
-        run: |
-          echo "Environment: ${{ inputs.environment }}"
-          echo "Namespace: ${{ inputs.namespace }}"
-          echo "Action: ${{ inputs.action }}"
-          echo "Apply Terraform: ${{ inputs.apply_terraform }}"
-          echo "AWS Region: $AWS_REGION"
-          echo "Cluster Name: $CLUSTER_NAME"
+  - name: Terraform Init
+    if: ${{ inputs.action == 'plan' || inputs.action == 'destroy' || inputs.apply_terraform == true }}
+    working-directory: terraform/eks
+    run: |
+      terraform init -input=false
 
-      - name: Terraform Init
-        if: ${{ inputs.action == 'plan' || inputs.action == 'destroy' || inputs.apply_terraform == true }}
-        working-directory: terraform/eks
-        run: |
-          terraform init -input=false
+  - name: Terraform Plan
+    if: ${{ inputs.action == 'plan' }}
+    working-directory: terraform/eks
+    run: |
+      terraform plan -input=false
 
-      - name: Terraform Plan
-        if: ${{ inputs.action == 'plan' }}
-        working-directory: terraform/eks
-        run: |
-          terraform plan -input=false
+  - name: Terraform Apply
+    if: ${{ inputs.action == 'deploy' && inputs.apply_terraform == true }}
+    working-directory: terraform/eks
+    run: |
+      terraform apply -auto-approve
 
-      - name: Terraform Apply
-        if: ${{ inputs.action == 'deploy' && inputs.apply_terraform == true }}
-        working-directory: terraform/eks
-        run: |
-          terraform apply -auto-approve
+  - name: Terraform Destroy
+    if: ${{ inputs.action == 'destroy' }}
+    working-directory: terraform/eks
+    run: |
+      terraform destroy -auto-approve
 
-      - name: Terraform Destroy
-        if: ${{ inputs.action == 'destroy' }}
-        working-directory: terraform/eks
-        run: |
-          terraform destroy -auto-approve
+  - name: Configure kubectl for EKS
+    if: ${{ inputs.action == 'deploy' }}
+    run: |
+      aws eks update-kubeconfig \
+        --region "$AWS_REGION" \
+        --name "$CLUSTER_NAME"
 
-      - name: Configure kubectl for EKS
-        if: ${{ inputs.action == 'deploy' }}
-        run: |
-          aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
+  - name: Verify cluster connection
+    if: ${{ inputs.action == 'deploy' }}
+    run: |
+      kubectl config current-context
+      kubectl get nodes
 
-      - name: Deploy Kubernetes manifests
-        if: ${{ inputs.action == 'deploy' }}
-        run: |
-          kubectl apply -f kubernetes/ -n $KUBE_NAMESPACE
+  - name: Deploy Kubernetes manifests
+    if: ${{ inputs.action == 'deploy' }}
+    run: |
+      kubectl apply -f kubernetes/namespace.yaml || true
+
+      kubectl create namespace "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+      kubectl apply -f kubernetes/configs/ -n "$KUBE_NAMESPACE" || true
+      kubectl apply -f kubernetes/secrets/ -n "$KUBE_NAMESPACE" || true
+      kubectl apply -f kubernetes/rbac/ -n "$KUBE_NAMESPACE" || true
+      kubectl apply -f kubernetes/storage/ -n "$KUBE_NAMESPACE" || true
+      kubectl apply -f kubernetes/services/ -n "$KUBE_NAMESPACE" || true
+      kubectl apply -f kubernetes/deployments/ -n "$KUBE_NAMESPACE" || true
+      kubectl apply -f kubernetes/daemonset/ -n "$KUBE_NAMESPACE" || true
+      kubectl apply -f kubernetes/hpa/ -n "$KUBE_NAMESPACE" || true
+      kubectl apply -f kubernetes/ingress/ -n "$KUBE_NAMESPACE" || true
+
+  - name: Deploy monitoring stack
+    if: ${{ inputs.action == 'deploy' }}
+    run: |
+      kubectl apply -f kubernetes/monitoring/
+
+  - name: Verify deployment
+    if: ${{ inputs.action == 'deploy' }}
+    run: |
+      kubectl get pods -n "$KUBE_NAMESPACE"
+      kubectl get svc -n "$KUBE_NAMESPACE"
+      kubectl get ingress -n "$KUBE_NAMESPACE" || true
+      kubectl get pods -n monitoring || true
+      kubectl get svc -n monitoring || true
+```
