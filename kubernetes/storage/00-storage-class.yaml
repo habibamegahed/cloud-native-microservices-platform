@@ -9,7 +9,6 @@ parameters:
   iops: "3000"
   throughput: "125"
   encrypted: "true"
-  deleteOnTermination: "true"
 allowVolumeExpansion: true
 reclaimPolicy: Delete
 volumeBindingMode: WaitForFirstConsumer
@@ -26,7 +25,6 @@ parameters:
   iops: "5000"
   throughput: "250"
   encrypted: "true"
-  deleteOnTermination: "false"
 allowVolumeExpansion: true
 reclaimPolicy: Retain
 volumeBindingMode: WaitForFirstConsumer

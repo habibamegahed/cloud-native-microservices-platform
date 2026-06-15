@@ -1,0 +1,75 @@
+name: Manual CI/CD Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Choose deployment environment"
+        required: true
+        type: choice
+        default: dev
+        options:
+          - dev
+          - staging
+          - prod
+
+      namespace:
+        description: "Kubernetes namespace"
+        required: true
+        type: choice
+        default: sock-shop
+        options:
+          - sock-shop
+          - habiba-dev
+          - cloudnova
+
+      action:
+        description: "What do you want to run?"
+        required: true
+        type: choice
+        default: deploy
+        options:
+          - plan
+          - deploy
+          - destroy
+
+      apply_terraform:
+        description: "Run Terraform?"
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  manual-run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Show selected parameters
+        run: |
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Namespace: ${{ inputs.namespace }}"
+          echo "Action: ${{ inputs.action }}"
+          echo "Apply Terraform: ${{ inputs.apply_terraform }}"
+
+      - name: Terraform Plan
+        if: ${{ inputs.action == 'plan' || inputs.apply_terraform == true }}
+        run: |
+          cd terraform/eks
+          terraform init
+          terraform plan
+
+      - name: Deploy Kubernetes manifests
+        if: ${{ inputs.action == 'deploy' }}
+        run: |
+          echo "Deploying to namespace: ${{ inputs.namespace }}"
+          kubectl apply -f kubernetes/ -n ${{ inputs.namespace }}
+
+      - name: Destroy Terraform
+        if: ${{ inputs.action == 'destroy' }}
+        run: |
+          cd terraform/eks
+          terraform init
+          terraform destroy -auto-approve
