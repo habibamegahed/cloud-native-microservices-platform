@@ -44,3 +44,68 @@ on:
         required: false
         type: string
         default: us-east-1
+
+jobs:
+  ci-cd:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.inputs.aws_region }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.5.7
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Terraform init
+        if: ${{ github.event.inputs.apply_terraform == 'true' }}
+        run: |
+          cd terraform/eks
+          terraform init -input=false
+
+      - name: Terraform plan
+        if: ${{ github.event.inputs.apply_terraform == 'true' && github.event.inputs.action == 'plan' }}
+        run: |
+          cd terraform/eks
+          terraform plan -input=false -out=plan.tfplan
+
+      - name: Terraform apply
+        if: ${{ github.event.inputs.apply_terraform == 'true' && github.event.inputs.action == 'deploy' }}
+        run: |
+          cd terraform/eks
+          terraform apply -input=false -auto-approve
+
+      - name: Terraform destroy
+        if: ${{ github.event.inputs.apply_terraform == 'true' && github.event.inputs.action == 'destroy' }}
+        run: |
+          cd terraform/eks
+          terraform destroy -input=false -auto-approve
+
+      - name: Configure kubeconfig
+        if: ${{ github.event.inputs.action != 'plan' }}
+        run: |
+          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ github.event.inputs.aws_region }}
+
+      - name: Deploy Kubernetes manifests
+        if: ${{ github.event.inputs.action == 'deploy' }}
+        run: |
+          kubectl apply -f kubernetes/
+
+      - name: Destroy Kubernetes manifests
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        run: |
+          kubectl delete -f kubernetes/ --ignore-not-found=true
