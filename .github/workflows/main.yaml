@@ -45,6 +45,11 @@ on:
         type: string
         default: us-east-1
 
+      eks_cluster_name:
+        description: "EKS cluster name (optional, falls back to secret EKS_CLUSTER_NAME)"
+        required: false
+        type: string
+
 jobs:
   ci-cd:
     runs-on: ubuntu-latest
@@ -98,7 +103,12 @@ jobs:
       - name: Configure kubeconfig
         if: ${{ github.event.inputs.action != 'plan' }}
         run: |
-          aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ github.event.inputs.aws_region }}
+          CLUSTER_NAME=${{ github.event.inputs.eks_cluster_name || secrets.EKS_CLUSTER_NAME }}
+          if [ -z "$CLUSTER_NAME" ]; then
+            echo "Error: EKS cluster name is not provided. Set github.event.inputs.eks_cluster_name or secrets.EKS_CLUSTER_NAME."
+            exit 1
+          fi
+          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region ${{ github.event.inputs.aws_region }}
 
       - name: Deploy Kubernetes manifests
         if: ${{ github.event.inputs.action == 'deploy' }}
