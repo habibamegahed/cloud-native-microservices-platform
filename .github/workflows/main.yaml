@@ -159,6 +159,23 @@ jobs:
           echo "Cluster info (may fail if not available):"
           kubectl cluster-info || true
 
+      - name: Wait for Kubernetes API
+        if: ${{ github.event.inputs.action != 'plan' }}
+        run: |
+          echo "Waiting for Kubernetes API to become reachable..."
+          for i in {1..30}; do
+            if kubectl get nodes >/dev/null 2>&1; then
+              echo "Kubernetes API is reachable"
+              exit 0
+            fi
+            echo "Kubernetes API not reachable yet (attempt $i/30), sleeping 10s..."
+            sleep 10
+          done
+          echo "Kubernetes API did not become reachable after 5 minutes"
+          kubectl config current-context || true
+          kubectl cluster-info || true
+          exit 1
+
       - name: Deploy Kubernetes manifests
         if: ${{ github.event.inputs.action == 'deploy' }}
         run: |
