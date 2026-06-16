@@ -65,6 +65,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Setup Terraform
+        if: ${{ inputs.action == 'plan' || inputs.action == 'destroy' || inputs.apply_terraform == true }}
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+
       - name: Terraform Plan
         if: ${{ inputs.action == 'plan' || inputs.apply_terraform == true }}
         run: |
