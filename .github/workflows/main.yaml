@@ -70,18 +70,19 @@ jobs:
   sonarqube-scan:
     name: SonarQube scan
     runs-on: ubuntu-latest
-    if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != '' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Java (required by SonarScanner)
+        if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != '' }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '11'
 
       - name: Run SonarScanner (Docker)
+        if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != '' }}
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
