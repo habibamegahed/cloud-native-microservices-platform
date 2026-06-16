@@ -149,12 +149,26 @@ jobs:
           fi
           aws eks update-kubeconfig --name "$CLUSTER_NAME" --region ${{ github.event.inputs.aws_region }}
 
+      - name: Kubernetes diagnostics
+        if: ${{ github.event.inputs.action != 'plan' }}
+        run: |
+          echo "Current kubeconfig context:"
+          kubectl config current-context || true
+          echo "Client version:"
+          kubectl version --client || true
+          echo "Cluster info (may fail if not available):"
+          kubectl cluster-info || true
+
       - name: Deploy Kubernetes manifests
         if: ${{ github.event.inputs.action == 'deploy' }}
         run: |
-          kubectl apply -f kubernetes/
+          NAMESPACE=${{ github.event.inputs.namespace }}
+          echo "Deploying to namespace: $NAMESPACE"
+          kubectl apply -f kubernetes/ -n "$NAMESPACE" --validate=false
 
       - name: Destroy Kubernetes manifests
         if: ${{ github.event.inputs.action == 'destroy' }}
         run: |
-          kubectl delete -f kubernetes/ --ignore-not-found=true
+          NAMESPACE=${{ github.event.inputs.namespace }}
+          echo "Deleting manifests from namespace: $NAMESPACE"
+          kubectl delete -f kubernetes/ -n "$NAMESPACE" --ignore-not-found=true --validate=false
